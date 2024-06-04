@@ -1,0 +1,484 @@
+unit AppList;
+
+interface
+uses
+  Classes, Menus, Winapi.Windows, System.Generics.Collections, Vcl.Grids,
+  Vcl.Controls, Vcl.StdCtrls, Vcl.CheckLst, StrUtils, Graphics;
+const
+  hour2dot3 ='hr %2.3f ';
+  hour2dot3wS ='hr %2.3f %s';
+  //{ TODO -oPat -cprerelease : Checklistbox[0] is switch now }
+  cEverything = 'Everything';
+
+  GoodApps: Tarray<string> = [cEveryThing,'Shell_TrayWnd','Notepad', 'TAppBuilder', 'Window',
+   'Chrome_WidgetWin_1', 'Notepad++', {'TDesksKick',} 'TfmPeInformation' ];
+type
+  ptrApp = ^TApp;   //component may be
+  TApp = record
+    Handle: HWnd;
+//    processID: NativeInt;
+//    processThd: NativeInt; //does each Desktop have its own thread
+//    MenuItem: TMenuItem;
+    ClassName: string;
+    Name: string;
+//    sTime: string;        Times stored in log file
+//    sFirstTime: string;
+    sVersion: string;
+    Title: string;
+    sgRow: Integer;
+    Used,
+    MarkTick,
+    AcculmTick : Uint64;
+    &Set: double;
+    Icon: TIcon;
+   // xSet: 1..2;
+  end;
+
+  TptrApps = class(Tlist<ptrApp>)
+    AppBuilderCount: Integer;
+    slLog: TStrings;
+    sBanner: PString;
+    sgGrid: TStringGrid;
+    ChBx: TCheckListBox;
+    H: HWND;
+  private
+//  class var classBDS: TApp;
+//    popup: TPopupMenu;
+//    IconList: TImageList;
+    procedure SGdrawCell(Sender: TObject; ACol, ARow: Integer;
+                                    Rect: TRect; State: TGridDrawState);
+  public
+    desiredExes: TArray<string>;
+    function ENumWindowsProc(wHandle: HWND; inSG: TStringGrid): BOOL; stdcall;
+    procedure AddNewExe(const aHndl: Hwnd; const aClassName, aTitle, aHour: string);
+    procedure changeExesList(Sender: TObject);
+    procedure EnumApps(passedHandle: HWND);
+    procedure RemoveStaleItems;
+    procedure CheckForeGroundWindows;
+    procedure CheckforActiveAppTitleChange;
+    function getVersionasString(inAppName: string): string;
+    class function HookInUI(inSG: TStringGrid; inLog: TStrings;  inChBx: TcheckListBox;
+                     var inBanner: PString): TptrApps;
+    procedure StringGridDblClick(Sender: Tobject);
+    procedure updateSG(inTool: ptrApp; inRow: Integer);
+  end;
+ function GetSmallIconFromExecutableFile(const FileName: string): TIcon;
+
+implementation
+
+uses
+  System.SysUtils, Winapi.Messages, Winapi.PsAPI;
+var
+  //for hour meters to work
+  cacheApp : TApp;
+  focusedApp: ptrApp;
+
+// exe icon snatcher not used for now 2023 i.e. can't get working Pat
+ type
+  PHICON = ^HICON;
+
+function ExtractIconEx(lpszFile: LPCWSTR; nIconIndex: Integer;
+  phiconLarge, phiconSmall: PHICON; nIcons: UINT): UINT; stdcall; external 'shell32.dll' name 'ExtractIconExW';
+
+/// <remarks> SO answer David Heffernan May 20, 2013 at 17:15 </remarks>
+function GetSmallIconFromExecutableFile(const FileName: string): TIcon;
+var
+  Icon: HICON;
+  ExtractedIconCount: UINT;
+begin
+  Result := nil;
+  try
+    ExtractedIconCount := ExtractIconEx(
+      PChar(FileName),
+      0,   //was 0
+      nil,
+      @Icon,
+      1
+    );
+    Win32Check(ExtractedIconCount=1);
+    Result := TIcon.Create;
+    Result.Handle := Icon;
+  except
+    Result.Free;
+    raise;
+  end;
+end; //**)
+
+              /// <Remarks> You see me now</Remarks>
+function AppActivate(WindowHandle: HWND): boolean;// overload;
+begin
+   try
+      SendMessage(WindowHandle, WM_SYSCOMMAND, SC_HOTKEY, WindowHandle);
+      SendMessage(WindowHandle, WM_SYSCOMMAND, SC_ARRANGE, WindowHandle);
+      result := SetForegroundWindow(WindowHandle);
+   except
+      on Exception do Result := false;
+   end;
+end;
+
+/// <remarks> source aehimself uBdsLauncher2.pas</remarks>
+function GetWindowExeName(wHandle: HWND): string;
+var
+  PID: DWORD;
+  hProcess: THandle;
+  nTemp: Cardinal;
+  Modules: array [0 .. 255] of THandle;
+  Buffer: array [0 .. 4095] of char;
+begin
+  Result := '';
+  if GetWindowThreadProcessId(wHandle, PID) <> 0 then
+  begin
+    hProcess := OpenProcess(PROCESS_QUERY_INFORMATION or PROCESS_VM_READ, False, PID);
+    if hProcess <> 0 then
+      if EnumProcessModules(hProcess, @Modules[0], Length(Modules), nTemp) then
+        if GetModuleFileNameEx(hProcess, 0, Buffer, SizeOf(Buffer)) > 0 then
+          Result := Buffer;
+  end;
+end;
+
+{ TptrApps }
+
+procedure TptrApps.AddNewExe(const aHndl: HWnd;
+  const aClassName, aTitle, aHour: string);
+var
+  lpApp: ptrApp;
+  //LIcon: TIcon;
+begin
+  New(lpApp);
+  Add(lpApp);
+
+//  if lpApp.AcculmTick > 0 then slLog.Add(lpApp.Name + lpApp.AcculmTick);
+
+  lpApp.sgRow := Count;
+  lpApp.ClassName := aClassName;
+  lpApp.Name := GetWindowExeName(aHndl);
+  lpApp.Icon := TIcon.Create;
+    // try pathed exe for icon and version
+
+  try
+  lpApp.Icon := GetSmallIconFromExecutableFile(lpApp.Name);
+  except
+    lpApp.Icon := nil;
+  end;
+
+  lpApp.sVersion := getVersionasString(lpApp.Name);
+  lpApp.Name := ExtractFileName(lpApp.Name);
+  lpApp.Handle := aHndl;
+  ////lpApp.sFirstTime := aHour;
+  lpApp.AcculmTick := 0;
+  lpApp.MarkTick := GetTickCount64;
+  lpApp.Used := 1;
+  lpApp.Title := aTitle;
+  if aClassName = 'Shell_TrayWnd'
+     then lpApp.Title := 'click here to surface Taskbar';   { TODO -oPat : add to title check too }
+
+
+//  lpAPP.xSet := 1;
+  lpApp.&Set := 2.2;
+  // UX here
+  updateSG(lpApp, Count);
+  sBanner^ := lpApp.Name + ' opened.';    //use constant string on first pass or setting to Everthing
+  slLog.Insert(0, aHour + ' '  + ClassName + ' ' +
+    aTitle  + ' ' + ' opened.');//lpApp.AcculmTick.ToString);
+end;
+
+procedure TptrApps.changeExesList(Sender: TObject);
+var
+  CX: TCheckListBox;
+  de: Integer;
+  I: Integer;  { TODO -oPat :    Add logic that set checked if the running programs are on the list when program is started or when a everthing is selected the self doesn't needed so uncheck or leave off list. }
+begin
+  de := 0;
+  CX := Sender as TCheckListBox;
+  setlength(desiredExes,CX.Items.Count);
+  for I := 1 to CX.Items.Count - 1 do
+    if CX.Checked[I] then  //
+      begin
+        desiredExes[de] := CX.Items[I];
+        Inc(de);
+      end;
+  SetLength(desiredExes, de);
+end;
+
+procedure TptrApps.CheckForeGroundWindows;
+var
+  awn: HWnd;
+  // WinInstance: THandle;
+  strHr: string;// WinModuleName: string;
+  Title, ClassName: Array [0 .. 255] Of char;
+  ii: Integer;
+  lpApp: ptrApp;
+  ///EveryThing,
+  AllWindows, ChosenApp: Boolean;
+begin
+  awn := GetForegroundWindow;
+  if awn = 0 then
+    sbanner^ := 'No foreground window'
+  else if awn <> focusedApp.Handle then
+    Try
+      cacheApp.Handle := awn;
+      GetClassName(awn, ClassName, 255);
+      GetWindowText(awn, Title, 255);
+      cacheApp.Title := Title;
+      strHr := Format (hour2dot3, [24 * Time]);
+      //strHr := Format ('Dy %d hr %2.3f ', [Trunc(Date - 44926), 24 * Time]);
+      sbanner^ := 'Launcher/selecter';
+
+      AllWindows := ChBx.Checked[0];
+      chosenApp := IndexText(Trim(ClassName), desiredExes) >= 0;
+      if AllWindows or chosenApp then
+        begin
+          for ii := 0 to Count - 1 do
+            if awn = items[ii].Handle then
+              begin
+                lpApp := items[ii];
+                lpApp.Title := Title;
+///                lpApp.sTime := strHr;
+                Inc(lpApp.Used);
+                updateSG (lpApp, ii + 1);
+                slLog.Append(strHr + Title);
+                sBanner^ := lpApp.Name + ' focused.';
+                // update text and log not checkbox
+                // ChBx.Items.Append(strhr + Title);
+                focusedApp := lpApp;
+                focusedApp.MarkTick := GetTickCount64;
+                exit
+              end;
+
+          AddNewExe(awn, classname, Title, strHr);
+        end;
+    Except
+      On E: Exception Do
+      begin
+        sbanner^ := (E.ClassName + ': ' + E.Message); // begin
+        // raise; surfaced with log
+      end
+      else
+        sBanner^ := 'Error anyhow';
+    End;
+end;
+
+procedure TptrApps.CheckforActiveAppTitleChange;
+var
+  Title: Array [0 .. 255] Of char;
+  sTitle: string;
+
+begin
+  GetWindowText(focusedApp.Handle, Title, 255);
+  sTitle := Trim(Title);
+  if  focusedApp.Title <> sTitle then
+  begin
+    FocusedApp.Title := sTitle;
+    slLog.Append(Format('hr %2.5f %s',[24 * Time, sTitle]));
+    sBanner^ := sTitle;
+    //CacheAwnRTitle := sTitle;
+  end;
+
+  // Update running App hours ran
+  with focusedApp^ do
+    sgGrid.Cells[4, sgRow] := Format('%1.5f', [(acculmTick  + gettickcount64 - markTick)/3600_000]);
+
+end;
+
+procedure TptrApps.EnumApps(passedHandle: HWND);
+begin
+  ENumWindowsProc(passedHandle, Self.sgGrid);
+end;
+
+function TptrApps.ENumWindowsProc(wHandle: HWND; inSG: TStringGrid): BOOL;
+var
+  Title,ClassName: array[0..255] of char;
+  strHour: string;
+begin
+  GetClassName(wHandle, ClassName, 255);
+  //if IsWindowVisible(wHandle) then    { TODO -oPat :    Add logic that set checked if the running programs are on the list when program is started or when a everthing is selected the self doesn't needed so uncheck or leave off list. }
+  if IndexText(Trim(ClassName), desiredExes) >= 0 then
+  begin
+    GetWindowText(wHandle, Title, 255);
+    strHour := Format('%2.3f',[24 * Time]);
+    AddNewExe(wHandle,Classname,Title,strHour);
+  end;
+  Result := True;
+end;
+
+class function TptrApps.HookInUI(inSG: TStringGrid; inLog: TStrings; inChBx: TcheckListBox;
+      var  inBanner: PString): TptrApps;
+begin
+  Result := nil;
+  //New(focusedApp);
+  focusedApp := @cacheApp;
+  var R := TptrApps.Create;
+
+  R.ChBx := inChBx;
+  R.ChBx.OnClick := R.changeExesList;
+  R.ChBx.Items.Clear;
+//  R.ChBx.Items.Add('Everything');
+//  R.ChBx.Checked[0] := False;
+  for var I := Low(goodApps) to High(goodApps) do
+    begin
+      R.ChBx.Items.add(goodApps[I]);
+      R.ChBx.Checked[I{+1}] := True;   { TODO -oPat :    +1 was needed to hard switch the Everything switch may add a freeze or snapshoot to get more windows }
+    end;
+  R.changeExesList(R.ChBx); //pre-use or prime the Exelist with update procedure
+  R.sBanner := inBanner;
+  R.SBanner^ := 'Inited';
+  R.slLog := inLog;
+  R.sgGrid := inSG;
+  R.sgGrid.OnDblClick := R.StringGridDblClick;
+  R.sgGrid.OnEnter := R.StringGridDblClick;
+  R.sgGrid.OnDrawCell := R.SGdrawCell;
+  R.sgGrid.Rows[0].CommaText := 'Name, Title, Class, Used, Hours, Version';
+  R.sgGrid.ColWidths[0] := 140;
+  R.sgGrid.ColWidths[1] := 330;
+  R.sgGrid.ColWidths[2] := 150;
+  R.sgGrid.ColWidths[3] :=  60;
+  R.sgGrid.ColWidths[4] :=  90;
+
+  Result := R;
+end;
+
+Type
+  TKrackSG = class (TcustomGrid) end;
+
+procedure TptrApps.RemoveStaleItems;
+var
+  isStaleQ: ptrApp;
+  sRemoved: string;
+begin
+  isStaleQ := nil;
+  try
+    for var i := Count - 1 downto 0 do
+    begin
+      isStaleQ := List[i];
+      if not IsWindow(isStaleQ.Handle) then
+        begin
+          TKrackSG(sgGrid).DeleteRow(i + 1);     //Remy
+          sRemoved := sRemoved + isStaleQ.Name + ' ';
+          Remove(isStaleQ);
+          Dispose(isStaleQ);
+        end;
+    end;
+    if SRemoved <> '' then
+      begin
+        sRemoved := Format(hour2dot3,[Time*24]) + sRemoved + ' closed';
+        SBanner^ := sRemoved;
+        slLog.insert(0, sRemoved);
+      end;
+
+  except
+    On E: Exception do if assigned(isStaleQ) then
+        slLog.Append(isStaleQ.Name + ' ' + E.ClassName + ': ' + E.Message); // begin
+    else
+        slLog.Append('Frittle Fraddle');
+  end;
+end;
+
+function TptrApps.getVersionasString(inAppName: string): string;
+var
+  Major, Minor, Build: Cardinal;
+begin
+  Try
+  Major := 6;
+  Minor := 6;
+  Build := 6;
+  GetProductVersion(inAppName, Major, Minor, Build);
+  sBanner^ := inAppName;
+  Result := format('%d.%d.%d',[Major, Minor, Build]);
+  Except on E: Exception do
+      Result := E.ClassName + ':' +E.Message
+  else
+      Result := 'AbbyNormal Error';   //seen DP for use on other exceptions
+  End;
+end;
+
+procedure TptrApps.SGdrawCell(Sender: TObject; ACol, ARow: Integer; Rect: TRect;
+  State: TGridDrawState);
+begin
+  if (ACol = 0) and (ARow > 0) then
+  begin
+    var SG1 := Sender as TStringGrid;
+    SG1.Canvas.Brush.Color := clMoneyGreen;
+    SG1.Canvas.FillRect(Rect);
+    if Count > ARow then begin
+        SG1.Canvas.TextRect(Rect,Items[Arow-1].Name,[tfCenter, tfRight]);
+        SG1.Canvas.Draw(REct.Left,REct.Top, Items[Arow-1].Icon);
+
+    end;
+  end;
+end;
+
+procedure TptrApps.StringGridDblClick(Sender: Tobject);
+begin
+  var Idx :=  sgGrid.Selection.Top - 1;
+  if Idx < Count then
+  AppActivate (List[Idx].Handle);
+end;
+
+procedure TptrApps.updateSG(inTool: ptrApp; inRow: Integer);
+begin
+  if sgGrid.RowCount < inRow then
+  sgGrid.RowCount := inRow + 1;
+  var i := InRow;
+  //sgGrid.Brush.Color := clsilver;
+  //with sgGrid.Canvas do TextRect(Rect.Left, ;           //0,i, inTool.Icon,
+  sgGrid.Cells[0, i] := inTool.Name;
+  sgGrid.Cells[1, i] := inTool.Title;
+  sgGrid.Cells[2, i] := inTool.ClassName;
+  sgGrid.Cells[3, i] := inTool.Used.ToString;
+  ///sgGrid.Cells[4, i] := inTool.sTime;
+  sgGrid.Cells[5, i] := inTool.sVersion;
+end;
+
+// additional UI for smaller jobs 16 put overlay on check group
+
+//  R.popup := inPopup;
+//  inPopUpParent.popupMenu := R.Popup;
+
+//        for var m := popup.items.Count - 1 downto 0 do
+//        begin
+//          MItem := popup.items[m];
+//          if MItem.Tag = isStaleQ.Handle then
+//          begin
+//            //if assigned(mItem.Bitmap) then MItem.Bitmap.Free;
+//            MItem.Free;
+//            // Freeandnil(mitem);
+//            break;
+//          end;
+//        end;
+
+
+//var AppBuilderCount: Integer = 0;
+(***
+procedure TptrApps.AddToolUpdateUI(inApp: ptrApp; aMenuItemClick: TnotifyEvent);
+var
+ // i: Integer;
+  Icon: TIcon;
+begin
+  //if inApp.ClassName = 'TAppBuilder' then
+  begin
+    Inc(AppBuilderCount);
+    inApp.MenuItem := TMenuItem.Create(popup);
+//    inApp.menu.Caption := AppBuilderCount.ToString + '_Delphi' + ' ' +
+//      inApp.sVersion;
+    inApp.MenuItem.Caption := inApp.Name + ' ' + inApp.sVersion;
+    inApp.MenuItem.Tag := inApp.Handle;
+    inApp.MenuItem.OnClick := aMenuItemClick;
+    popup.items.Add(inApp.MenuItem);
+//    icon := GetSmallIconFromExecutableFile(inApp.Name);
+//    inApp.MenuItem.Bitmap.Assign(icon);
+//    IconList.Add(inApp.MenuItem.Bitmap,nil);
+//    inApp.MenuItem.Bitmap.SaveToFile(ExtractFileName(inApp.Name)+'.Bmp');
+  end;
+end;
+***)
+(***
+procedure TptrApps.appsMenuclick(Sender: TObject);
+var
+  Hndl: HWnd;
+begin
+  Hndl := (Sender as TMenuItem).Tag;
+  AppActivate(Hndl);
+end;
+***)
+
+end.
