@@ -7,32 +7,21 @@ uses
 const
   hour2dot3 ='hr %2.3f ';
   hour2dot3wS ='hr %2.3f %s';
-  //{ TODO -oPat -cprerelease : Checklistbox[0] is switch now done removed switch pf}
-  //cEverything = 'Everything';
+
   selfClass = 'TDesksKick';
+  //Not necessary
   TAppClass = 'TApplication';
-
-  AppStates: TArray<string> = ['Running','Stopped','Whatnot'];
-
-
   GoodApps: Tarray<string> = [ TAppClass,{'TfmGrepResult','TfmPeInformation',} 'Shell_TrayWnd','Notepad', 'TAppBuilder', 'Window',
    'Chrome_WidgetWin_1', 'Notepad++', selfClass ];
+//  AppStates: TArray<string> = ['Running','Stopped','Whatnot'];
+
 type
-//  TFindWindowRec = record
-//    ModuleToFind: string;
-//    FoundHWnd: HWND;
-//    Count: Integer;
-//  end;
 
   TappHandles = Tlist<NativeUInt>;
 
-  ptrApp = ^TApp;   //component may be
+  ptrApp = ^TApp;
   TApp = record
     Handle: HWnd;
-    //    processID: NativeInt;
-//    processThd: NativeInt; //does each Desktop have its own thread
-//    MenuItem: TMenuItem;
-
     ClassName: string;
     Name: string;
     sVersion: string;
@@ -49,8 +38,9 @@ type
     phState: string;
     bAllwindows: Boolean;
     SB: TPanel;
+    SBSubject: string;
     ChBxs: TCheckListBox;
-    Skippers: TArray<string>;
+//    Skippers: TArray<string>;
     DesiredExes: TArray<string>;
     bEverything: Boolean;
 //    AppBuilderCount: Integer;   used if want First started last out
@@ -61,12 +51,11 @@ type
 
     procedure SGdrawCell(Sender: TObject; ACol, ARow: Integer;
                                     Rect: TRect; State: TGridDrawState);
-   // function EnumWindowsCallBack2(Handle: hWnd): BOOL; winapi;
   public
     sgGrid: TStringGrid;
     slLog: TStrings;
     procedure AddNewExe(const aHndl: Hwnd; const aClassName, aTitle, aHour: string);
-    procedure changeExesList(Sender: TObject);
+    procedure ChangeExesList(Sender: TObject);
     procedure ChangeState(Sender: TObject);
     destructor Destroy; override;
 //    procedure EnumApps(passedHandle: HWND);
@@ -84,6 +73,7 @@ class procedure OpenLocalFile(Path, Params: String);
     procedure Pulse(Sender: TObject);
     procedure StringGridDblClick(Sender: Tobject);
     procedure updateSG(inTool: ptrApp; inRow: Integer);
+    //property SBSubject: string;
   end;
 //    function EnumWindowsCallBack(Handle: hWnd; var FindWindowRec: TFindWindowRec): BOOL; stdcall;
 
@@ -205,12 +195,12 @@ begin
           end;
   // UX here
   updateSG(lpApp, Count);
-  SB.Caption := lpApp.Name + ' opened.';    //use constant string on first pass or setting to Everthing
+  SBSubject := lpApp.Name + ' opened.';
   slLog.add(aHour + ' '  + ClassName + ' ' +
     aTitle  + ' ' + ' opened.');//lpApp.AcculmTick.ToString);
 end;
 
-procedure TptrApps.changeExesList(Sender: TObject);
+procedure TptrApps.ChangeExesList(Sender: TObject);
 var
   CXs: TCheckListBox;
   se,
@@ -223,21 +213,21 @@ begin
   de := 0;
   CXs := Sender as TCheckListBox;
   setlength(DesiredExes,CXs.Items.Count);
-  setlength(Skippers,CXs.Items.Count);
-  for I := 1 to CXs.Items.Count - 1 do
+//  setlength(Skippers,CXs.Items.Count);
+  for I := 0 to CXs.Items.Count - 1 do
     if CXs.Checked[I] then  //
       begin
         DesiredExes[de] := CXs.Items[I];
         Inc(de);
-      end
-    else
-      begin
-        Skippers[se] := CXs.Items[I];
-        Inc(se);
       end;
+//    else
+//      begin
+//        Skippers[se] := CXs.Items[I];
+//        Inc(se);
+//      end;
 
   SetLength(DesiredExes, de);
-  SetLength(Skippers,se);
+//  SetLength(Skippers,se);
 end;
 
 procedure TptrApps.CheckForeGroundWindows(const inHandle: Hwnd);
@@ -258,7 +248,7 @@ begin
       awn  := GetForegroundWindow;
 
   if awn = 0 then
-    SB.Caption := 'Not a foreground window'
+    SBSubject := 'Not a foreground window'
   else if awn <> focusedApp.Handle then
     Try
       cacheApp.Handle := awn;
@@ -282,7 +272,7 @@ begin
                 Inc(lpApp.Used);
                 updateSG (lpApp, ii + 1);
                 slLog.Append(strHr + Title);
-                SB.Caption := lpApp.Name + ' focused.';
+                SBsubject := lpApp.Name + ' focused.';
                 // update text and log not checkbox
                 // ChBxs.Items.Append(strhr + Title);
                 focusedApp := lpApp;
@@ -295,12 +285,8 @@ begin
     Except
       On E: Exception Do
       begin
-        SB.Caption := (E.ClassName + ': ' + E.Message); // begin
-        // raise; surfaced with log
-
-      end
-//      else
-//        SB.Caption := 'Error anyhow';   //?? Needed pat
+        SBSubject := (E.ClassName + ': ' + E.Message); // begin
+      end;
     End;
 end;
 
@@ -321,7 +307,7 @@ end;
 
 procedure TptrApps.ChangeState(Sender: TObject);
 begin
-  if Sender = nil then
+  if Sender = self then
     AppTimer.Enabled := false
   else
   begin
@@ -367,9 +353,6 @@ begin
       exit
      end;
   end;
-  //if True then
-
-//  if focusedApp^.ClassName <> 'Shell_TrayWnd' then
   begin
     GetWindowText(focusedApp.Handle, Title, 255);
     sTitle := Trim(Title);
@@ -378,27 +361,18 @@ begin
         focusedApp.Title := sTitle;
         S := Format('hr %2.5f %s', [24 * Time, sTitle]);
         slLog.Add(S);
-        SB.Caption := S;
+        SB.Caption := S; //SBSubject
       end;
   end
-//  else
-//    sgGrid.Cells[1, focusedApp^.sgRow] := 'Hid';
 end;
 
-//procedure TptrApps.EnumApps(passedHandle: HWND);
-//begin
-//  ENumWindowsProc(passedHandle, Self.sgGrid);
-//end;
-//
-//procedure TptrApps.EnumApps2(passedHandle: HWND);
-//begin
-//
-//end;
-
-{ TODO -oPat :    Add logic that checked
-   if the running programs are on the list when program is started or
+{ TODO -oPat :    Add logic to check
+   if the running programs are on the list when self is started or
    when a everthing is selected the self doesn't needed so
-   uncheck or leave off list. }
+   uncheck or leave off list. 3/4 done
+
+   save hourage icon and paths of desiredApps in DB
+   }
 var lastWindowName:string = '';
 function EnumWindowsCallBack64(Handle: hWnd; Hs:TappHandles): BOOL; stdcall;
 const
@@ -410,8 +384,7 @@ var
   style: DWORD;
   testS: string;
 begin
-  setlength(WinFileName, C_FileNameLength);
-  // Pid := GetProcessid(
+  SetLength(WinFileName, C_FileNameLength);
   GetWindowThreadProcessId(Handle, PID);
   hProcess := OpenProcess(PROCESS_ALL_ACCESS, false, PID);
   style := GetWindowLongPtr(Handle, GWL_STYLE);
@@ -429,15 +402,10 @@ begin
     end;
   end;
   Result := True;
-
 end;
 
 function EnumWindowsProc32(wHandle: HWND;var Hs:TappHandles): BOOL; stdcall;
-var
-  Title, ClassName: array[0..255] of char;
 begin
-//  GetWindowText(wHandle, Title, 255);
-//  GetClassName(wHandle, ClassName, 255);
   if IsWindowVisible(wHandle) then
     Hs.Add(wHandle);
   Result := True;
@@ -446,14 +414,12 @@ end;
 procedure TptrApps.GetAnyRunningDesiredApps(Sender: TObject);//(WantedApps: TArray<string>);
 var
   i,j: NativeUInt;
-
 begin
   {$IFDEF CPU32BITS}
       EnumWindows(@EnumWindowsProc32, LParam(@Handles));
   {$ELSE}
-      EnumWindows(@EnumWindowsCallback64, {NativeINT}LParam(Handles));
+      EnumWindows(@EnumWindowsCallback64, LParam(Handles));
   {$ENDIF}
-
 
   with Handles do
   begin
@@ -483,7 +449,7 @@ begin
       exit;
 
     GetProductVersion(inAppName, Major, Minor, Build);
-    SB.Caption := inAppName;
+    SBSubject := inAppName;
     Result := Format('%d.%d.%d', [Major, Minor, Build]);
   Except
     on E: Exception do
@@ -496,7 +462,6 @@ end;
 class function TptrApps.HookInUI(inSG: TStringGrid; inLog: TStrings; inChBxs: TcheckListBox;
      inBanner: TPanel): TptrApps;
 begin
-  //Result := nil;
   cacheApp.sgRow := 1;
   cacheApp.AcculmTick := GetTickCount64;
   focusedApp := @cacheApp;
@@ -516,7 +481,7 @@ begin
     end;
   R.changeExesList(R.ChBxs); //pre-use or prime the Exelist with update procedure
   R.SB := inBanner;
-  R.SB.Caption := 'Inited';
+  R.SBSubject := 'Inited';
   R.slLog := inLog;
   R.sgGrid := inSG;
   R.sgGrid.OnClick := R.StringGridDblClick;
@@ -535,9 +500,8 @@ begin
   R.appTimer.OnTimer := R.Pulse;
   R.appTimer.Enabled := True;
   Result := R;
-
 //Need to add restarter
-
+ { TODO : Add self healing code }
 end;
 
 function GetDeskTopDirectory: String;
@@ -602,7 +566,7 @@ begin
   end;
   //old Combobox was using text and insert[0]here.
   //slLog.Strings[sllog.Count -1] := strHr + ' - ' + SB.Caption;//     ptrS^;
-  SB.Caption := strHr;// + ' ' + copy(SB.Caption,8,length(SB.Caption));
+  SB.Caption := strHr + ' ' + SBSubject;// + ' ' + copy(SB.Caption,8,length(SB.Caption));
   AppTimer.Enabled := True;
   BusyCount := 0;
 end;
@@ -633,7 +597,7 @@ begin
     if SRemoved <> '' then
       begin
         sRemoved := Format(hour2dot3,[Time*24]) + sRemoved + ' closed';
-        SB.Caption := sRemoved;
+        SBSubject := sRemoved;
         slLog.Add(sRemoved);
       end;
 
@@ -651,11 +615,11 @@ begin
   if (ACol = 0) and (ARow > 0) then
   begin
     var SG1 := Sender as TStringGrid;
-    SG1.Canvas.Brush.Color := clWindowFrame;
+//    SG1.Canvas.Brush.Color := clWindowFrame;
     //SG1.Canvas.font.Color := clLime;
 
-    if focusedApp.sgRow = ARow
-      then SG1.Canvas.Brush.Color := clWindowText;
+//    if focusedApp.sgRow = ARow
+//      then SG1.Canvas.Brush.Color := clWindowText;
     SG1.Canvas.FillRect(Rect);
     if Count >= ARow then
       begin

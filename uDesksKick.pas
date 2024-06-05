@@ -77,7 +77,8 @@ end;
 procedure TDesksKick.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 begin
 try
-  AppWindows.ChangeState(nil);
+
+  AppWindows.ChangeState(Sender);
 //  apptmr.Enabled := False;  //this disabled the frame
   AppWindows.slLog.SaveToFile('C:\_tickers\machinelog'   //todo use truncate(1/1/present year) some how
        + Format ('023.Dy%d.hr%2.3f%s', [Trunc(Date - 44926 + 365), 24 * Time, '.log']));
