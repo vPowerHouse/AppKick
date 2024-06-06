@@ -66,16 +66,14 @@ type
     procedure CheckforActiveAppTitleChange;
     function getVersionasString(inAppName: string): string;
 
-class function HookInUI(inSG: TStringGrid; inLog: TStrings;  inChBxs: TcheckListBox;
-                  inBanner: TPanel): TptrApps;
-class procedure OpenLocalFile(Path, Params: String);
-    procedure GetAnyRunningDesiredApps(Sender: TObject);//(WantedApps: TArray<string>);
+class function HookInUI(inSG: TStringGrid; inLog: TStrings;  inChBxs: TcheckListBox; inBanner: TPanel): TptrApps;
+//class procedure OpenLocalFile(Path, Params: String);
+    procedure GetSomeWindows(Sender: TObject);//(WantedApps: TArray<string>);
     procedure Pulse(Sender: TObject);
     procedure StringGridDblClick(Sender: Tobject);
     procedure updateSG(inTool: ptrApp; inRow: Integer);
     //property SBSubject: string;
   end;
-//    function EnumWindowsCallBack(Handle: hWnd; var FindWindowRec: TFindWindowRec): BOOL; stdcall;
 
 implementation
 
@@ -170,18 +168,14 @@ begin
   lpApp.Icon := nil;
   if lpApp.Name <> '' then
     try
-//      lpApp.Icon := TIcon.Create;  works 64
       lpApp.Icon := GetSmallIconFromExecutableFile(lpApp.Name);
     except
       lpApp.Icon := nil;
     end;
 
   lpApp.sVersion := getVersionasString(lpApp.Name);
-
-
   lpApp.Name := ExtractFileName(lpApp.Name);
   lpApp.Handle := aHndl;
-  ////lpApp.sFirstTime := aHour;
   lpApp.AcculmTick := 0;
   lpApp.MarkTick := GetTickCount64;
   lpApp.Used := 1;
@@ -196,7 +190,7 @@ begin
   // UX here
   updateSG(lpApp, Count);
   SBSubject := lpApp.Name + ' opened.';
-  slLog.add(aHour + ' '  + ClassName + ' ' +
+  slLog.add(aHour + ' '  + lpApp.Name + ' ' +
     aTitle  + ' ' + ' opened.');//lpApp.AcculmTick.ToString);
 end;
 
@@ -233,7 +227,7 @@ end;
 procedure TptrApps.CheckForeGroundWindows(const inHandle: Hwnd);
 var
   awn: HWnd;
-  strHr: string;// WinModuleName: string;
+  sHour: string;
   Title, ClassName: Array [0 .. 255] Of char;
   sClassName: string;
   ii: Integer;
@@ -255,7 +249,7 @@ begin
       GetClassName(awn, ClassName, 255);
       GetWindowText(awn, Title, 255);
       cacheApp.Title := Title;
-      strHr := Format (hour2dot3, [24 * Time]);
+      sHour := Format (hour2dot3, [24 * Time]);
       sClassName := Trim(ClassName);
 //      if IndexText(sClassName, Skippers) >= 0
 //          then exit;
@@ -268,19 +262,19 @@ begin
               begin
                 lpApp := items[ii];
                 lpApp.Title := Title;
-///                lpApp.sTime := strHr;
+///                lpApp.sTime := sHour;
                 Inc(lpApp.Used);
                 updateSG (lpApp, ii + 1);
-                slLog.Append(strHr + Title);
+                slLog.Append(sHour + Title);
                 SBsubject := lpApp.Name + ' focused.';
                 // update text and log not checkbox
-                // ChBxs.Items.Append(strhr + Title);
+                // ChBxs.Items.Append(sHour + Title);
                 focusedApp := lpApp;
                 focusedApp.MarkTick := GetTickCount64;
                 exit
               end;
 
-          AddNewExe(awn, classname, Title, strHr);
+          AddNewExe(awn, classname, Title, sHour);
         end;
     Except
       On E: Exception Do
@@ -326,7 +320,7 @@ begin
 
         end;
       4:
-        GetAnyRunningDesiredApps(Sender);
+        GetSomeWindows(Sender);
       // 3:
       // begin
       // AppTimer.Enabled := false;
@@ -411,7 +405,7 @@ begin
   Result := True;
 end;
 
-procedure TptrApps.GetAnyRunningDesiredApps(Sender: TObject);//(WantedApps: TArray<string>);
+procedure TptrApps.GetSomeWindows(Sender: TObject);//(WantedApps: TArray<string>);
 var
   i,j: NativeUInt;
 begin
@@ -428,10 +422,10 @@ begin
         if Items[j] = Items[i] then
             Remove(Items[j]);
   end;
-//  sgGrid.BeginUpdate;
+  sgGrid.BeginUpdate;
   for var X := 0 to Handles.Count - 1 do
   CheckForeGroundWindows(Handles[X]);
-//  sgGrid.EndUpdate;
+  sgGrid.EndUpdate;
   // why not work DesiredExes := DesiredExes - [selfClass];
 //  setLength(DesiredExes,Length(DesiredExes) - 1);
 end;
@@ -504,40 +498,6 @@ begin
  { TODO : Add self healing code }
 end;
 
-function GetDeskTopDirectory: String;
-var
-//  PIDL: PItemIDList;
-//  LinkName: string;
-  Path: array [0..MAX_PATH-1] of Char;
-begin
-//SHGetSpecialFolderLocation    pre Win7
-//  SHGetKnownFolderPath
-//  (0, CSIDL_DESKTOPDIRECTORY, PIDL);
-//  SHGetPathFromIDList(PIDL, InFolder);
-
-  SHGetFolderPath(0, CSIDL_DESKTOP, 0, SHGFP_TYPE_CURRENT, @Path[0]);
-
-end;
-
-
-class procedure TptrApps.OpenLocalFile(Path, Params: String);
-var
-  SEInfo: TShellExecuteInfo;
- // dope: Tarray<string>;
-begin
-//  GetAnyRunningDesiredApps(dope);
-//  if (Path > '') and FileExists(Path) then begin
-//    FillChar(SEInfo, SizeOf(SEInfo), 0);
-//    SEInfo.cbSize := SizeOf(TShellExecuteInfo);
-//    SEInfo.Wnd := 0;
-//    SEInfo.lpFile := PChar(Path);
-//    SEInfo.lpParameters := Pchar(Params);
-//    SEInfo.nShow := SW_SHOWDEFAULT;
-//    SEInfo.lpVerb := 'open';
-//    SEInfo.lpDirectory := PChar(ExtractFileDir(Path));
-//    ShellExecuteEx(@SEInfo);
-//  end;
-end;
 
 
 var Busycount: Integer = 0;
@@ -556,7 +516,7 @@ begin
   BusyCount := 1;
   AppTimer.Enabled := False;
   CheckForeGroundWindows(0);
-  var strHr := Format ('hr %2.4f', [24 * Time]);
+  var sHour := Format ('hr %2.4f', [24 * Time]);
   Inc(Counter);
   if Counter > 5 then
   begin
@@ -565,8 +525,8 @@ begin
     CheckforActiveAppTitleChange;
   end;
   //old Combobox was using text and insert[0]here.
-  //slLog.Strings[sllog.Count -1] := strHr + ' - ' + SB.Caption;//     ptrS^;
-  SB.Caption := strHr + ' ' + SBSubject;// + ' ' + copy(SB.Caption,8,length(SB.Caption));
+  //slLog.Strings[sllog.Count -1] := sHour + ' - ' + SB.Caption;//     ptrS^;
+  SB.Caption := sHour + ' ' + SBSubject;// + ' ' + copy(SB.Caption,8,length(SB.Caption));
   AppTimer.Enabled := True;
   BusyCount := 0;
 end;
